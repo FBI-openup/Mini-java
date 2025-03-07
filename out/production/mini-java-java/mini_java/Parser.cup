@@ -1,0 +1,248 @@
+import java_cup.runtime.*;
+import java.util.*;
+
+terminal Ident IDENT;
+terminal Constant CST;
+terminal Binop CMP;
+terminal BOOLEAN, CLASS, ELSE, EXTENDS, FOR, IF, INSTANCEOF, INT,
+         NEW, NULL, PUBLIC, RETURN, STATIC, THIS, VOID,
+         AND, OR, NOT,
+	 LP, RP, LSQ, RSQ, LBRA, RBRA, COMMA, EQUAL, SEMICOLON, DOT,
+	 PLUS, MINUS, TIMES, DIV, MOD;
+terminal UMINUS;
+terminal THEN;
+terminal CAST;
+terminal PAREN;
+
+non terminal PFile file;
+non terminal LinkedList<PClass> list_class;
+non terminal PClass class_;
+non terminal Ident ident_main, ident_String, extends_;
+non terminal LinkedList<PDecl> list_decl;
+non terminal PDecl decl;
+non terminal PStmt stmt, block;
+non terminal PType base_type, type;
+non terminal PParam param;
+non terminal LinkedList<PParam> parameters, list_comma_param, nonempty_list_comma_param;
+non terminal LinkedList<PStmt> list_stmt;
+non terminal PExpr expr, option_expr;
+non terminal LinkedList<PExpr> nonempty_list_comma_expr, list_comma_expr;
+
+precedence nonassoc THEN;
+precedence nonassoc ELSE;
+
+precedence left OR;
+precedence left AND;
+precedence nonassoc NOT;
+precedence nonassoc CMP, INSTANCEOF;
+precedence left PLUS, MINUS;
+precedence left TIMES, DIV, MOD;
+precedence nonassoc UMINUS, NOT, CAST;
+precedence nonassoc PAREN;
+precedence left DOT;
+
+start with file;
+
+file ::=
+  list_class:l
+    {: PClass c = l.getLast();
+       if (!c.name.id.equals("Main"))
+         throw new Exception("last class must be Main");
+       LinkedList<PDecl> dl = c.l;
+       if (dl.size() != 1) throw new Exception("syntax error");
+       PDecl d = dl.getFirst();
+       if (!(d instanceof PDmethod)) throw new Exception("syntax error");
+       RESULT = new PFile(l); :}
+;
+
+list_class ::=
+  class_:c list_class:l
+   {: l.addFirst(c); RESULT = l; :}
+|
+   {: RESULT = new LinkedList<PClass>(); :}
+;
+class_ ::=
+  CLASS IDENT:id extends_:ext LBRA list_decl:l RBRA
+   {: RESULT = new PClass(id, ext, l); :}
+;
+
+extends_ ::=
+  EXTENDS IDENT:id {: RESULT = id; :}
+|                  {: RESULT = null; :}
+;
+list_decl ::=
+  decl:d list_decl:l
+   {: l.addFirst(d); RESULT = l; :}
+|
+   {: RESULT = new LinkedList<PDecl>(); :}
+;
+decl ::=
+  PUBLIC STATIC VOID ident_main LP ident_String IDENT LSQ RSQ RP
+  block:b
+    {: RESULT = new PDmethod(null, new Ident("main"), null, b); :}
+| type:ty IDENT:id SEMICOLON
+    {: RESULT = new PDattribute (ty, id); :}
+| IDENT:id parameters:p block:b
+    {: RESULT = new PDconstructor (id, p, b); :}
+| type:ty IDENT:id parameters:p block:b
+    {: RESULT = new PDmethod (ty, id, p, b); :}
+| VOID IDENT:id parameters:p block:b
+    {: RESULT = new PDmethod (null, id, p, b); :}
+;
+ident_main ::=
+  IDENT:id
+  {: if (!id.id.equals("main")) throw new Exception("main expected"); :}
+;
+ident_String ::=
+  IDENT:id
+  {: if (!id.id.equals("String")) throw new Exception("String expected"); :}
+;
+
+block ::=
+  LBRA list_stmt:l RBRA {: RESULT = new PSblock(l); :}
+;
+
+parameters ::=
+  LP list_comma_param:l RP {: RESULT = l; :}
+;
+list_comma_param ::=
+  nonempty_list_comma_param:l
+   {: RESULT = l; :}
+|
+   {: RESULT = new LinkedList<PParam>(); :}
+;
+
+nonempty_list_comma_param ::=
+  param:x COMMA nonempty_list_comma_param:l
+   {: l.addFirst(x); RESULT = l; :}
+| param:x
+   {: LinkedList<PParam> l = new LinkedList<PParam>();
+      l.add(x); RESULT = l; :}
+;
+
+param ::=
+  type:ty IDENT:id {: RESULT = new PParam(ty, id); :}
+;
+
+base_type ::=
+  INT     {: RESULT = new PTint(); :}
+| BOOLEAN {: RESULT = new PTboolean(); :}
+;
+type ::=
+  base_type:ty  {: RESULT = ty; :}
+| IDENT:id      {: RESULT = new PTident(id); :}
+;
+
+stmt ::=
+  SEMICOLON
+    {: RESULT = new PSblock(); :}
+| expr:e SEMICOLON
+    {: RESULT = new PSexpr(e); :}
+| type:ty IDENT:id EQUAL expr:e SEMICOLON
+    {: RESULT = new PSvar (ty, id, e); :}
+| type:ty IDENT:id SEMICOLON
+    {: RESULT = new PSvar (ty, id, null); :}
+| IF LP expr:e RP stmt:s
+    {: RESULT = new PSif (e, s, new PSblock()); :}
+    %prec THEN
+| IF LP expr:e RP stmt:s1 ELSE stmt:s2
+    {: RESULT = new PSif (e, s1, s2); :}
+| RETURN SEMICOLON
+    {: RESULT = new PSreturn(null); :}
+| RETURN expr:e SEMICOLON
+    {: RESULT = new PSreturn(e); :}
+| block:b
+    {: RESULT = b; :}
+| FOR LP
+  option_expr:e1 SEMICOLON option_expr:e2 SEMICOLON option_expr:e3
+  RP stmt:s
+    {: PStmt s1 = e1==null ? new PSblock() : new PSexpr(e1);
+       e2 = e2==null ? new PEcst(new Cbool(true)) : e2;
+       PStmt s3 = e3==null ? new PSblock() : new PSexpr(e3);
+       RESULT = new PSfor (s1, e2, s3, s); :}
+;
+
+option_expr ::=
+  expr:e  {: RESULT = e;    :}
+|         {: RESULT = null; :}
+;
+
+expr ::=
+  CST:c
+    {: RESULT = new PEcst(c); :}
+| THIS
+    {: RESULT = new PEthis(); :}
+| NULL
+    {: RESULT = new PEnull(); :}
+| MINUS expr:e1
+    {: RESULT = new PEunop(Unop.Uneg, e1); :}
+  %prec UMINUS
+| NOT expr:e1
+    {: RESULT = new PEunop(Unop.Unot, e1); :}
+| expr:e1 PLUS expr:e2
+    {: RESULT = new PEbinop(Binop.Badd, e1, e2); :}
+| expr:e1 MINUS expr:e2
+    {: RESULT = new PEbinop(Binop.Bsub, e1, e2); :}
+| expr:e1 TIMES expr:e2
+    {: RESULT = new PEbinop(Binop.Bmul, e1, e2); :}
+| expr:e1 DIV expr:e2
+    {: RESULT = new PEbinop(Binop.Bdiv, e1, e2); :}
+| expr:e1 MOD expr:e2
+    {: RESULT = new PEbinop(Binop.Bmod, e1, e2); :}
+| expr:e1 CMP:c expr:e2
+    {: RESULT = new PEbinop(c, e1, e2); :}
+| expr:e1 AND expr:e2
+    {: RESULT = new PEbinop(Binop.Band, e1, e2); :}
+| expr:e1 OR expr:e2
+    {: RESULT = new PEbinop(Binop.Bor, e1, e2); :}
+| IDENT:id
+    {: RESULT = new PEident(id); :}
+| expr:e DOT IDENT:id
+    {: RESULT = new PEdot(e, id); :}
+| IDENT:id EQUAL expr:e
+    {: RESULT = new PEassignIdent(id, e); :}
+| expr:e1 DOT IDENT:id EQUAL expr:e2
+    {: RESULT = new PEassignDot(e1, id, e2); :}
+| NEW IDENT:id LP list_comma_expr:al RP
+    {: RESULT = new PEnew (id, al); :}
+| IDENT:id LP list_comma_expr:al RP
+    {: RESULT = new PEcall (id, al); :}
+| expr:e DOT IDENT:id LP list_comma_expr:al RP
+    {: RESULT = new PEcall (e, id, al); :}
+| LP base_type:ty RP expr:e
+    {: RESULT = new PEcast (ty, e); :}
+    %prec CAST
+| LP expr:ty RP expr:e
+    {: if (ty instanceof PEident)
+         RESULT = new PEcast(new PTident(((PEident)ty).id), e);
+       else
+         throw new Exception("ident expected"); :}
+    %prec CAST
+| expr:e INSTANCEOF type:ty
+    {: RESULT = new PEinstanceof (e, ty); :}
+| LP expr:e RP
+    {: RESULT = e; :}
+    %prec PAREN
+;
+
+list_comma_expr ::=
+  nonempty_list_comma_expr:l
+   {: RESULT = l; :}
+|
+   {: RESULT = new LinkedList<PExpr>(); :}
+;
+
+nonempty_list_comma_expr ::=
+  expr:x COMMA nonempty_list_comma_expr:l
+   {: l.addFirst(x); RESULT = l; :}
+| expr:x
+   {: LinkedList<PExpr> l = new LinkedList<PExpr>();
+      l.add(x); RESULT = l; :}
+;
+
+list_stmt ::=
+  stmt:s list_stmt:l
+   {: l.addFirst(s); RESULT = l; :}
+|
+   {: RESULT = new LinkedList<PStmt>(); :}
+;
